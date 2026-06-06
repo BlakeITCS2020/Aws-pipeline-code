@@ -1,89 +1,158 @@
-# Nash DataOps Pipeline Code
+# Nash DataOps Terraform Infrastructure
 
-This repository contains AWS Glue job scripts for the NYC FHV lakehouse pipeline.
+This repository provisions the dev AWS infrastructure for a Bronze/Silver/Gold data pipeline using S3, Glue, Glue Data Quality, Step Functions, Redshift, and local Metabase.
 
-## Scripts
+## Architecture
 
-- `scripts/glue_process_raw_data.py`: Reads Bronze trip data from the Glue Catalog, standardizes columns, enriches with taxi zone metadata, adds time fields and `trip_id`, and appends Silver Parquet partitioned by year, month, and `run_id`.
-- `scripts/glue_quarantine_failed_data.py`: Copies a failed Silver batch to `quarantine/fhvhv_trips/run_id=<run_id>/` after the Glue Data Quality gate fails.
-- `scripts/glue_manage_redshift_schema.py`: Creates the Redshift analytics model: `dim_zone`, `dim_date`, `fact_fhvhv_trips`, and staging tables.
-- `scripts/glue_load_data_to_redshift.py`: Builds Gold Parquet staging files and loads Redshift using `COPY`, then performs idempotent delete/insert upserts.
+![Architecture Diagram](media/DataOps.drawio.png)
 
-## Pipeline Contract
+## Presentation Docs
 
-The infrastructure repo runs the scripts through Step Functions:
+- `docs/dataops-presentation-guide.md`: speaker-ready guide matching the
+  presentation table of contents.
+- `metabase/docs/dashboard-metric-guide.md`: guide for reading each Metabase
+  dashboard metric.
 
-1. Crawl Bronze S3 data.
-2. Run `glue_process_raw_data.py`.
-3. Crawl Silver Parquet data.
-4. Run AWS Glue Data Quality rules against the Silver table.
-5. If quality fails, run `glue_quarantine_failed_data.py` and stop.
-6. If quality passes, run `glue_manage_redshift_schema.py`.
-7. Run `glue_load_data_to_redshift.py`.
+## Project Structure
 
-## Important Arguments
+- `terraform/main.tf`: provider, S3 backend, S3 data bucket, IAM, VPC lookup, Glue script upload, and Redshift cluster resources.
+- `terraform/bootstrap_remote_state.sh`: one-time bootstrap for the S3 state bucket and DynamoDB lock table.
+- `terraform/glue_catalog.tf`: Glue database and Bronze/Silver crawlers.
+- `terraform/glue_process_raw_data_job.tf`: Bronze-to-Silver Spark job.
+- `terraform/glue_data_quality.tf`: Glue Data Quality rulesets for the Bronze input gate and Silver output gate.
+- `terraform/glue_quarantine_failed_data_job.tf`: quarantine job used by the failure branch.
+- `terraform/glue_load_data_to_redshift_job.tf`: Redshift connection, schema job, and COPY load job.
+- `terraform/glue_workflow.tf`: Step Functions state machine plus EventBridge schedule.
+- `terraform/observability.tf`: metric-only CloudWatch observability dashboard.
+- `terraform/outputs.tf`: useful deployment outputs.
+- `metabase/`: local Metabase and Postgres setup.
+- `data/`: sample trip Parquet files and taxi zone lookup data.
 
-`glue_process_raw_data.py`:
+## Pipeline Flow
 
-- `data_bucket_name`
-- `database_name`
-- `fhvhv_table_name`
-- `run_id`
+1. Raw trip files and reference data are manually uploaded to `bronze/`.
+2. The Bronze Glue crawler creates `bronze_fhvhv_trips`.
+3. Glue Data Quality evaluates Bronze input rules before transformation.
+4. Glue transforms Bronze to Silver Parquet at `silver/fhvhv_trips/`, partitioned by `pickup_year`, `pickup_month`, and `run_id`.
+5. The Silver crawler creates `silver_fhvhv_trips`.
+6. Glue Data Quality evaluates Silver rules: required identifiers, timestamps, zones, row count, month bounds, and trip duration bounds.
+7. Failed Silver quality runs are written to `quarantine/fhvhv_trips/run_id=<run_id>/` and the state machine fails intentionally.
+8. Passing runs create or verify the Redshift star schema.
+9. The load job writes Gold Parquet staging files and uses Redshift `COPY` into staging tables before upserting dimensions and facts.
 
-`glue_quarantine_failed_data.py`:
+## Deployment
 
-- `data_bucket_name`
-- `run_id`
-- `dq_ruleset_name`
-- `dq_result_id`
-- `dq_score`
+Prerequisites:
 
-`glue_manage_redshift_schema.py`:
+- AWS CLI configured with profile `cloud-user`
+- Terraform v1.0+
+- S3 bucket for Terraform state and DynamoDB table for state locking
+- `terraform.tfvars` in `terraform/`
 
-- `redshift_database`
-- `redshift_schema`
-- `redshift_table`
-- `redshift_host`
-- `redshift_username`
-- `redshift_password`
+Example `terraform.tfvars`:
 
-`glue_load_data_to_redshift.py`:
+```hcl
+region           = "us-west-1"
+data_bucket_name = "nash-dataops-data-630952739663-us-west-1-dev"
+environment      = "dev"
+upload_sample_data = false
 
-- `data_bucket_name`
-- `redshift_database`
-- `redshift_schema`
-- `redshift_table`
-- `redshift_host`
-- `redshift_username`
-- `redshift_password`
-- `redshift_iam_role_arn`
-- `run_id`
+redshift_username = "admin"
+redshift_password = "ReplaceWithYourOwnPassword123!"
+redshift_node_type = "ra3.large"
 
-## CI/CD
+tags = {
+  Owner      = "DataOps-Team"
+  Project    = "ETL-Demo"
+  CostCenter = "DataEngineering"
+}
+```
 
-For the current dev setup, Terraform can still upload everything in `scripts/`
-to S3 through `aws_s3_object.glue_artifacts`.
+Deploy:
 
-The restored GitHub Actions workflow at `.github/workflows/s3-deploy.yml`
-supports automated script deployment for the current Step Functions flow:
+```bash
+export AWS_PROFILE=cloud-user
 
-- On push to `develop`, `master`, or `main`, it compiles the Glue scripts,
-  checks the expected script files exist, and syncs `scripts/` to
-  `s3://<DATAOPS_BUCKET>/scripts/`, then starts the Step Functions state
-  machine.
-- Branches `develop` and other non-prod branches use the GitHub environment
-  named `develop`; `master` and `main` use `prod`.
-- On manual `workflow_dispatch`, it starts the Step Functions state machine by
-  default after uploading scripts. Uncheck `trigger_pipeline` if you only want
-  to deploy the scripts.
+cd terraform
+./bootstrap_remote_state.sh
+cp terraform.tfvars.example terraform.tfvars
+# Edit terraform.tfvars and replace redshift_password.
+terraform init
+terraform apply
+```
 
-Required repository or environment secrets:
+Upload input data manually before running the pipeline:
 
-- `AWS_ACCESS_KEY_ID`
-- `AWS_SECRET_ACCESS_KEY`
-- `AWS_REGION`
-- `DATAOPS_BUCKET`
-- `DATAOPS_STATE_MACHINE_ARN`
+```bash
+aws s3 cp ../data/fhvhv_trips/2024/01/fhvhv_tripdata.parquet \
+  s3://$(terraform output -raw data_bucket_name)/bronze/fhvhv_trips/2024/01/fhvhv_tripdata.parquet
 
-The workflow starts the pipeline with `aws stepfunctions start-execution`; it no
-longer calls the old Glue Workflow API.
+aws s3 cp ../data/fhvhv_trips/2024/02/fhvhv_tripdata.parquet \
+  s3://$(terraform output -raw data_bucket_name)/bronze/fhvhv_trips/2024/02/fhvhv_tripdata.parquet
+
+aws s3 cp ../data/taxi_zone_lookup.csv \
+  s3://$(terraform output -raw data_bucket_name)/bronze/reference/taxi_zone_lookup.csv
+```
+
+Start a manual pipeline run:
+
+```bash
+aws stepfunctions start-execution \
+  --state-machine-arn "$(terraform output -raw step_functions_state_machine_arn)" \
+  --name "manual-$(date +%Y%m%d%H%M%S)" \
+  --input '{}'
+```
+
+## Observability
+
+Terraform provisions a CloudWatch observability dashboard for operational
+pipeline metrics only. It does not create alarms, tracing resources, or
+log-derived metric filters.
+
+The dashboard includes:
+
+- Step Functions execution starts, successes, failures, timeouts, and duration.
+- Glue ETL elapsed time, completed tasks, and bytes read for each pipeline job.
+- Glue Data Quality passed and failed rule metrics for the Bronze and Silver rulesets.
+
+Open the dashboard after `terraform apply`:
+
+```bash
+terraform output -raw cloudwatch_observability_dashboard_url
+```
+
+## Redshift Model
+
+The warehouse model is intentionally small but presentation-friendly:
+
+- `nyc_taxi.dim_zone`
+- `nyc_taxi.dim_date`
+- `nyc_taxi.fact_fhvhv_trips`
+
+This supports dashboard questions such as busiest pickup zones, trip volume by date, and trip duration by route.
+
+## Metabase
+
+```bash
+cd metabase
+cp .env.example .env
+# Edit .env and set REDSHIFT_PASSWORD to the Terraform Redshift password.
+docker compose up -d
+./setup-redshift-database.sh
+./import-demo-dashboards.py
+```
+
+Open `http://localhost:3001`. The helper script creates or updates the local
+Metabase Redshift connection for the `nyc_taxi` schema, then imports the demo
+dashboards. See `metabase/README.md` for manual connection details and sample
+dashboard SQL.
+
+The dashboard reading guide is in
+`metabase/docs/dashboard-metric-guide.md`.
+
+## Cleanup
+
+```bash
+cd terraform
+terraform destroy
+```

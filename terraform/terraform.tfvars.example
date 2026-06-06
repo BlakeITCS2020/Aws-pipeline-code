@@ -1,0 +1,19 @@
+region             = "us-west-1"
+data_bucket_name   = "nash-dataops-data-630952739663-us-west-1-dev"
+environment        = "dev"
+upload_sample_data = false
+
+redshift_username  = "admin"
+redshift_password  = "ReplaceWithYourOwnPassword123!"
+redshift_node_type = "ra3.large"
+redshift_database  = "dev"
+redshift_schema    = "nyc_taxi"
+redshift_table     = "fact_fhvhv_trips"
+
+pipeline_schedule_expression = "cron(0 0 3 * ? *)"
+
+tags = {
+  Owner      = "DataOps-Team"
+  Project    = "ETL-Demo"
+  CostCenter = "DataEngineering"
+}
