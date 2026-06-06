@@ -1,0 +1,105 @@
+name: Deploy Glue Scripts
+
+on:
+  push:
+    branches:
+      - develop
+      - master
+      - main
+  workflow_dispatch:
+    inputs:
+      trigger_pipeline:
+        description: "Start the Step Functions data pipeline after deploying scripts"
+        required: true
+        default: true
+        type: boolean
+
+jobs:
+  determine_environment:
+    runs-on: ubuntu-latest
+    outputs:
+      environment_name: ${{ steps.set-env.outputs.environment_name }}
+    steps:
+      - name: Set environment from branch
+        id: set-env
+        run: |
+          if [[ "${GITHUB_REF}" == "refs/heads/master" || "${GITHUB_REF}" == "refs/heads/main" ]]; then
+            echo "environment_name=prod" >> "${GITHUB_OUTPUT}"
+          else
+            echo "environment_name=develop" >> "${GITHUB_OUTPUT}"
+          fi
+
+  unit-test:
+    needs: determine_environment
+    runs-on: ubuntu-latest
+    environment: ${{ needs.determine_environment.outputs.environment_name }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Compile Glue scripts
+        run: |
+          python -m py_compile scripts/*.py
+
+  code-quality:
+    needs: determine_environment
+    runs-on: ubuntu-latest
+    environment: ${{ needs.determine_environment.outputs.environment_name }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check required Glue scripts exist
+        run: |
+          test -f scripts/glue_process_raw_data.py
+          test -f scripts/glue_quarantine_failed_data.py
+          test -f scripts/glue_manage_redshift_schema.py
+          test -f scripts/glue_load_data_to_redshift.py
+          test -f scripts/requirements.txt
+
+  deploy:
+    needs:
+      - determine_environment
+      - unit-test
+      - code-quality
+    runs-on: ubuntu-latest
+    environment: ${{ needs.determine_environment.outputs.environment_name }}
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION || 'us-west-1' }}
+      DATAOPS_BUCKET: ${{ secrets.DATAOPS_BUCKET }}
+      DATAOPS_STATE_MACHINE_ARN: ${{ secrets.DATAOPS_STATE_MACHINE_ARN }}
+      START_PIPELINE: ${{ github.event_name == 'push' || inputs.trigger_pipeline }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Validate deployment configuration
+        run: |
+          test -n "${DATAOPS_BUCKET}"
+          if [[ "${START_PIPELINE}" == "true" ]]; then
+            test -n "${DATAOPS_STATE_MACHINE_ARN}"
+          fi
+
+      - name: Upload Glue scripts to S3
+        run: |
+          aws s3 sync scripts/ "s3://${DATAOPS_BUCKET}/scripts/" \
+            --delete \
+            --exclude "__pycache__/*" \
+            --exclude "*.pyc" \
+            --region "${AWS_REGION}"
+
+      - name: Start Step Functions pipeline
+        if: ${{ github.event_name == 'push' || inputs.trigger_pipeline }}
+        run: |
+          aws stepfunctions start-execution \
+            --state-machine-arn "${DATAOPS_STATE_MACHINE_ARN}" \
+            --name "github-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --input '{}' \
+            --region "${AWS_REGION}"
