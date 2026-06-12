@@ -10,11 +10,6 @@ resource "aws_glue_data_quality_ruleset" "bronze_fhvhv_quality" {
   ]
   DQDL
 
-  target_table {
-    database_name = aws_glue_catalog_database.demo_db.name
-    table_name    = local.bronze_fhvhv_table_name
-  }
-
   tags = {
     Name  = "bronze-fhvhv-quality-${var.environment}"
     Layer = "Bronze"
@@ -40,11 +35,6 @@ resource "aws_glue_data_quality_ruleset" "silver_fhvhv_quality" {
     ColumnValues "trip_duration_minutes" between 0 and 1440
   ]
   DQDL
-
-  target_table {
-    database_name = aws_glue_catalog_database.demo_db.name
-    table_name    = local.silver_fhvhv_table_name
-  }
 
   tags = {
     Name  = "silver-fhvhv-quality-${var.environment}"
