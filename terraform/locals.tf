@@ -7,7 +7,7 @@ locals {
   bronze_fhvhv_table_name = "bronze_fhvhv_trips"
   silver_fhvhv_table_name = "silver_fhvhv_trips"
 
-  glue_artifact_source_dir = "${path.module}/../../nash-dataops-pipeline-code/scripts"
+  glue_artifact_source_dir = "${path.module}/../scripts"
   glue_artifact_files = toset([
     "glue_load_data_to_redshift.py",
     "glue_manage_redshift_schema.py",

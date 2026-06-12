@@ -2,12 +2,11 @@
 # This file sets up the core infrastructure components
 terraform {
   backend "s3" {
-    bucket         = "nash-dataops-tfstate-630952739663-us-west-1-dev"
+    bucket         = "glue-etl-demo-tfstate-ap-southeast-1-dev"
     key            = "aws/dataops/dev/terraform.tfstate"
-    region         = "us-west-1"
-    dynamodb_table = "nash-dataops-tf-locks-dev"
+    region         = "ap-southeast-1"
+    dynamodb_table = "glue-etl-demo-tf-locks-dev"
     encrypt        = true
-    profile        = "cloud-user"
   }
 }
 
@@ -23,7 +22,6 @@ provider "aws" {
       var.tags
     )
   }
-  profile = "cloud-user"
 }
 
 #-------------------- VPC Infrastructure --------------------
@@ -122,7 +120,7 @@ resource "aws_s3_object" "fhvhv_tripdata_sample_data" {
   bucket = aws_s3_bucket.data_bucket.id
   key    = "${local.bronze_prefix}/fhvhv_trips/2024/01/fhvhv_tripdata.parquet"
   source = "${path.module}/../data/fhvhv_trips/2024/01/fhvhv_tripdata.parquet"
-  etag   = filemd5("${path.module}/../data/fhvhv_trips/2024/01/fhvhv_tripdata.parquet")
+  etag   = var.upload_sample_data ? filemd5("${path.module}/../data/fhvhv_trips/2024/01/fhvhv_tripdata.parquet") : null
 }
 
 resource "aws_s3_object" "fhvhv_tripdata_sample_data_2" {
@@ -131,7 +129,7 @@ resource "aws_s3_object" "fhvhv_tripdata_sample_data_2" {
   bucket = aws_s3_bucket.data_bucket.id
   key    = "${local.bronze_prefix}/fhvhv_trips/2024/02/fhvhv_tripdata.parquet"
   source = "${path.module}/../data/fhvhv_trips/2024/02/fhvhv_tripdata.parquet"
-  etag   = filemd5("${path.module}/../data/fhvhv_trips/2024/02/fhvhv_tripdata.parquet")
+  etag   = var.upload_sample_data ? filemd5("${path.module}/../data/fhvhv_trips/2024/02/fhvhv_tripdata.parquet") : null
 }
 
 resource "aws_s3_object" "taxi_zone_lookup_sample_data" {
@@ -140,7 +138,7 @@ resource "aws_s3_object" "taxi_zone_lookup_sample_data" {
   bucket = aws_s3_bucket.data_bucket.id
   key    = "${local.bronze_prefix}/reference/taxi_zone_lookup.csv"
   source = "${path.module}/../data/taxi_zone_lookup.csv"
-  etag   = filemd5("${path.module}/../data/taxi_zone_lookup.csv")
+  etag   = var.upload_sample_data ? filemd5("${path.module}/../data/taxi_zone_lookup.csv") : null
 }
 
 # Create S3 directories for lakehouse layers and operational outputs
@@ -295,7 +293,7 @@ resource "aws_iam_role_policy" "glue_s3_access" {
 
 
 data "aws_secretsmanager_secret" "redshift" {
-  name = "redshift!redshift-cluster-1-awsuser"
+  name = var.redshift_secret_name
 }
 
 data "aws_secretsmanager_secret_version" "redshift" {
@@ -343,8 +341,8 @@ resource "aws_redshift_cluster" "dataops_redshift" {
   cluster_identifier        = "dataops-demo-cluster-${var.environment}"
   node_type                 = var.redshift_node_type
   number_of_nodes           = 1
-  master_username           = var.redshift_username
-  master_password           = var.redshift_password
+  master_username           = local.redshift_secret.username
+  master_password           = local.redshift_secret.password
   iam_roles                 = [aws_iam_role.glue_role.arn]
   cluster_type              = "single-node"
   encrypted                 = true

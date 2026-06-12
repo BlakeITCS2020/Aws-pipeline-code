@@ -1,10 +1,12 @@
-region             = "us-west-1"
-data_bucket_name   = "nash-dataops-data-630952739663-us-west-1-dev"
+region             = "ap-southeast-1"
+data_bucket_name   = "glue-etl-demo-data-bucket-dev"
 environment        = "dev"
 upload_sample_data = false
 
-redshift_username  = "admin"
-redshift_password  = "ReplaceWithYourOwnPassword123!"
+# Redshift credentials are fetched from AWS Secrets Manager
+# The secret must contain JSON with "username" and "password" keys
+redshift_secret_name = "redshift!default-namespace-admin"
+
 redshift_node_type = "ra3.large"
 redshift_database  = "dev"
 redshift_schema    = "nyc_taxi"

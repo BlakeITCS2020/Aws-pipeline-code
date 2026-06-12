@@ -3,11 +3,10 @@ data_bucket_name   = "glue-etl-demo-data-bucket-dev"
 environment        = "dev"
 upload_sample_data = false
 
+# Credentials are fetched from AWS Secrets Manager (see main.tf)
+# redshift_username and redshift_password are no longer needed in tfvars
 
-redshift_username  = local.redshift_secret.username
-redshift_password  = local.redshift_secret.password
-
-redshift_node_type = "rg.4xlarge"
+redshift_node_type = "ra3.large"
 redshift_database  = "dev"
 redshift_schema    = "nyc_taxi"
 redshift_table     = "fact_fhvhv_trips"

@@ -25,20 +25,11 @@ variable "environment" {
   }
 }
 
-# Redshift credentials
-variable "redshift_username" {
-  description = "Redshift master username"
+# Redshift secret name in AWS Secrets Manager
+variable "redshift_secret_name" {
+  description = "Name of the AWS Secrets Manager secret containing Redshift credentials (must have 'username' and 'password' keys)"
   type        = string
-}
-
-variable "redshift_password" {
-  description = "Redshift master password"
-  type        = string
-  sensitive   = true
-  validation {
-    condition     = length(var.redshift_password) >= 8
-    error_message = "Redshift password must be at least 8 characters long."
-  }
+  default     = "redshift!default-namespace-admin"
 }
 
 # Redshift configuration

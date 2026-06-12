@@ -7,8 +7,8 @@ resource "aws_glue_connection" "redshift_connection" {
 
   connection_properties = {
     JDBC_CONNECTION_URL = "jdbc:redshift://${aws_redshift_cluster.dataops_redshift.endpoint}/${var.redshift_database}"
-    USERNAME            = var.redshift_username
-    PASSWORD            = var.redshift_password
+    USERNAME            = local.redshift_secret.username
+    PASSWORD            = local.redshift_secret.password
   }
 
   physical_connection_requirements {
@@ -61,8 +61,8 @@ resource "aws_glue_job" "glue_manage_redshift_schema_job" {
     "--redshift_schema"                  = var.redshift_schema
     "--redshift_table"                   = var.redshift_table
     "--redshift_host"                    = aws_redshift_cluster.dataops_redshift.endpoint
-    "--redshift_username"                = var.redshift_username
-    "--redshift_password"                = var.redshift_password
+    "--redshift_username"                = local.redshift_secret.username
+    "--redshift_password"                = local.redshift_secret.password
     "--enable-job-insights"              = "true"
     "--enable-glue-datacatalog"          = "true"
     "--enable-metrics"                   = "true"
@@ -107,8 +107,8 @@ resource "aws_glue_job" "glue_load_data_to_redshift_job" {
     "--spark-event-logs-path"            = "s3://${aws_s3_bucket.data_bucket.bucket}/spark-logs/"
     "--data_bucket_name"                 = aws_s3_bucket.data_bucket.bucket
     "--redshift_host"                    = aws_redshift_cluster.dataops_redshift.endpoint
-    "--redshift_username"                = var.redshift_username
-    "--redshift_password"                = var.redshift_password
+    "--redshift_username"                = local.redshift_secret.username
+    "--redshift_password"                = local.redshift_secret.password
     "--redshift_database"                = var.redshift_database
     "--redshift_schema"                  = var.redshift_schema
     "--redshift_table"                   = var.redshift_table
