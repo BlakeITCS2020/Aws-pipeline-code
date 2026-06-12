@@ -1,0 +1,39 @@
+name: nash-dataops-metabase
+
+services:
+
+  postgres-db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${MB_APP_DB_PASS:-postgres}
+      PGDATA: /var/lib/postgresql/data
+      POSTGRES_USER: ${MB_APP_DB_USER:-postgres}
+      POSTGRES_DB: ${MB_APP_DB_NAME:-postgres}
+    volumes:
+      - ./pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${MB_APP_DB_USER:-postgres} -d ${MB_APP_DB_NAME:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  metabase-app:
+    image: metabase/metabase:latest
+    restart: unless-stopped
+    ports:
+      - "${METABASE_HOST_PORT:-3001}:3000"
+    volumes:
+      - ./metabase-data:/metabase-data
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_DBNAME: ${MB_APP_DB_NAME:-postgres}
+      MB_DB_PORT: 5432
+      MB_DB_USER: ${MB_APP_DB_USER:-postgres}
+      MB_DB_PASS: ${MB_APP_DB_PASS:-postgres}
+      MB_DB_HOST: postgres-db
+      MB_SITE_URL: ${METABASE_SITE_URL:-http://localhost:3001}
+      JAVA_TIMEZONE: ${JAVA_TIMEZONE:-Asia/Ho_Chi_Minh}
+    depends_on:
+      postgres-db:
+        condition: service_healthy

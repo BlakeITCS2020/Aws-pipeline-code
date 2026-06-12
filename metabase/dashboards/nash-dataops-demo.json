@@ -1,0 +1,280 @@
+{
+  "collection_name": "Nash DataOps Demo",
+  "collection_description": "Presentation dashboards for the AWS DataOps Redshift warehouse.",
+  "dashboards": [
+    {
+      "slug": "executive-overview",
+      "name": "Nash DataOps - Executive Overview",
+      "description": "High-level operating view of FHVHV trip volume, coverage, and demand patterns.",
+      "cards": [
+        {
+          "type": "heading",
+          "slug": "executive-kpis-heading",
+          "text": "Executive KPIs",
+          "layout": { "row": 0, "col": 0, "size_x": 24, "size_y": 1 }
+        },
+        {
+          "type": "text",
+          "slug": "executive-kpis-note",
+          "text": "Read this row left to right: loaded warehouse volume, average trip duration after quality filtering, and pickup/dropoff location completeness from the public source data.",
+          "layout": { "row": 1, "col": 0, "size_x": 24, "size_y": 1 }
+        },
+        {
+          "slug": "total-trips",
+          "name": "Total trips loaded",
+          "description": "Fact rows currently loaded into Redshift.",
+          "display": "scalar",
+          "layout": { "row": 2, "col": 0, "size_x": 6, "size_y": 4 },
+          "query": "select count(*)::bigint as trips\nfrom {{schema}}.fact_fhvhv_trips;"
+        },
+        {
+          "slug": "average-duration",
+          "name": "Average trip duration",
+          "description": "Mean trip duration in minutes after Silver quality filters.",
+          "display": "scalar",
+          "layout": { "row": 2, "col": 6, "size_x": 6, "size_y": 4 },
+          "query": "select round(avg(trip_duration_minutes), 2) as avg_minutes\nfrom {{schema}}.fact_fhvhv_trips;"
+        },
+        {
+          "slug": "pickup-location-coverage",
+          "name": "Pickup location coverage",
+          "description": "Percentage of fact rows with a pickup location ID.",
+          "display": "scalar",
+          "layout": { "row": 2, "col": 12, "size_x": 6, "size_y": 4 },
+          "query": "select round(100.0 * count(pu_location_id)::decimal(18, 2) / nullif(count(*), 0), 2) as pickup_location_pct\nfrom {{schema}}.fact_fhvhv_trips;"
+        },
+        {
+          "slug": "dropoff-location-coverage",
+          "name": "Dropoff location coverage",
+          "description": "Percentage of fact rows with a dropoff location ID.",
+          "display": "scalar",
+          "layout": { "row": 2, "col": 18, "size_x": 6, "size_y": 4 },
+          "query": "select round(100.0 * count(do_location_id)::decimal(18, 2) / nullif(count(*), 0), 2) as dropoff_location_pct\nfrom {{schema}}.fact_fhvhv_trips;"
+        },
+        {
+          "type": "heading",
+          "slug": "demand-pattern-heading",
+          "text": "Demand Pattern",
+          "layout": { "row": 6, "col": 0, "size_x": 24, "size_y": 1 }
+        },
+        {
+          "slug": "daily-trip-volume",
+          "name": "Daily trip volume",
+          "description": "Trip count by pickup date.",
+          "display": "line",
+          "visualization_settings": {
+            "graph.dimensions": ["pickup_date"],
+            "graph.metrics": ["trips"]
+          },
+          "layout": { "row": 7, "col": 0, "size_x": 16, "size_y": 8 },
+          "query": "select\n  d.full_date as pickup_date,\n  count(*)::bigint as trips\nfrom {{schema}}.fact_fhvhv_trips f\njoin {{schema}}.dim_date d\n  on f.pickup_date_key = d.date_key\ngroup by 1\norder by 1;"
+        },
+        {
+          "slug": "pickup-borough-mix",
+          "name": "Trips by pickup borough",
+          "description": "Pickup geography mix; Unknown represents sparse public source location IDs.",
+          "display": "bar",
+          "visualization_settings": {
+            "graph.dimensions": ["pickup_borough"],
+            "graph.metrics": ["trips"]
+          },
+          "layout": { "row": 7, "col": 16, "size_x": 8, "size_y": 8 },
+          "query": "select\n  coalesce(z.borough, 'Unknown') as pickup_borough,\n  count(*)::bigint as trips\nfrom {{schema}}.fact_fhvhv_trips f\nleft join {{schema}}.dim_zone z\n  on f.pu_location_id = z.location_id\ngroup by 1\norder by trips desc;"
+        },
+        {
+          "type": "heading",
+          "slug": "operational-distribution-heading",
+          "text": "Operational Distribution",
+          "layout": { "row": 15, "col": 0, "size_x": 24, "size_y": 1 }
+        },
+        {
+          "slug": "pickup-hour-volume",
+          "name": "Trips by pickup hour",
+          "description": "Hourly demand profile across loaded months.",
+          "display": "bar",
+          "visualization_settings": {
+            "graph.dimensions": ["pickup_hour"],
+            "graph.metrics": ["trips"],
+            "graph.x_axis.scale": "linear"
+          },
+          "layout": { "row": 16, "col": 0, "size_x": 12, "size_y": 8 },
+          "query": "select\n  pickup_hour,\n  count(*)::bigint as trips\nfrom {{schema}}.fact_fhvhv_trips\ngroup by 1\norder by 1;"
+        },
+        {
+          "slug": "warehouse-table-counts",
+          "name": "Warehouse table counts",
+          "description": "Simple proof that the star schema was populated.",
+          "display": "table",
+          "layout": { "row": 16, "col": 12, "size_x": 12, "size_y": 8 },
+          "query": "select 'fact_fhvhv_trips' as table_name, count(*)::bigint as row_count from {{schema}}.fact_fhvhv_trips\nunion all\nselect 'dim_date' as table_name, count(*)::bigint as row_count from {{schema}}.dim_date\nunion all\nselect 'dim_zone' as table_name, count(*)::bigint as row_count from {{schema}}.dim_zone\norder by table_name;"
+        }
+      ]
+    },
+    {
+      "slug": "zone-route-analysis",
+      "name": "Nash DataOps - Zone & Route Analysis",
+      "description": "Operational view of pickup/dropoff zones, borough flows, and busiest routes.",
+      "cards": [
+        {
+          "type": "heading",
+          "slug": "zone-demand-heading",
+          "text": "Zone Demand",
+          "layout": { "row": 0, "col": 0, "size_x": 24, "size_y": 1 }
+        },
+        {
+          "type": "text",
+          "slug": "zone-demand-note",
+          "text": "Use these charts to compare known pickup/dropoff zones. This public dataset has sparse pickup locations, so known-zone charts intentionally exclude null pickup IDs.",
+          "layout": { "row": 1, "col": 0, "size_x": 24, "size_y": 1 }
+        },
+        {
+          "slug": "top-pickup-zones",
+          "name": "Top pickup zones",
+          "description": "Most common known pickup zones.",
+          "display": "bar",
+          "visualization_settings": {
+            "graph.dimensions": ["pickup_zone"],
+            "graph.metrics": ["trips"]
+          },
+          "layout": { "row": 2, "col": 0, "size_x": 12, "size_y": 8 },
+          "query": "select\n  coalesce(z.borough, 'Unknown') || ' - ' || coalesce(z.zone, 'Unknown') as pickup_zone,\n  count(*)::bigint as trips\nfrom {{schema}}.fact_fhvhv_trips f\nleft join {{schema}}.dim_zone z\n  on f.pu_location_id = z.location_id\nwhere f.pu_location_id is not null\ngroup by 1\norder by trips desc\nlimit 15;"
+        },
+        {
+          "slug": "top-dropoff-zones",
+          "name": "Top dropoff zones",
+          "description": "Most common known dropoff zones.",
+          "display": "bar",
+          "visualization_settings": {
+            "graph.dimensions": ["dropoff_zone"],
+            "graph.metrics": ["trips"]
+          },
+          "layout": { "row": 2, "col": 12, "size_x": 12, "size_y": 8 },
+          "query": "select\n  coalesce(z.borough, 'Unknown') || ' - ' || coalesce(z.zone, 'Unknown') as dropoff_zone,\n  count(*)::bigint as trips\nfrom {{schema}}.fact_fhvhv_trips f\nleft join {{schema}}.dim_zone z\n  on f.do_location_id = z.location_id\nwhere f.do_location_id is not null\ngroup by 1\norder by trips desc\nlimit 15;"
+        },
+        {
+          "type": "heading",
+          "slug": "route-flow-heading",
+          "text": "Route Flow",
+          "layout": { "row": 10, "col": 0, "size_x": 24, "size_y": 1 }
+        },
+        {
+          "slug": "borough-to-borough-flows",
+          "name": "Borough-to-borough flows",
+          "description": "Trip flow between pickup and dropoff boroughs.",
+          "display": "table",
+          "layout": { "row": 11, "col": 0, "size_x": 10, "size_y": 9 },
+          "query": "select\n  coalesce(pu.borough, 'Unknown') as pickup_borough,\n  coalesce(dz.borough, 'Unknown') as dropoff_borough,\n  count(*)::bigint as trips,\n  round(avg(f.trip_duration_minutes), 2) as avg_minutes\nfrom {{schema}}.fact_fhvhv_trips f\nleft join {{schema}}.dim_zone pu\n  on f.pu_location_id = pu.location_id\nleft join {{schema}}.dim_zone dz\n  on f.do_location_id = dz.location_id\ngroup by 1, 2\norder by trips desc\nlimit 25;"
+        },
+        {
+          "slug": "top-routes",
+          "name": "Top pickup-to-dropoff routes",
+          "description": "Most frequent known zone pairs with average duration.",
+          "display": "table",
+          "layout": { "row": 11, "col": 10, "size_x": 14, "size_y": 9 },
+          "query": "select\n  coalesce(pu.zone, 'Unknown') as pickup_zone,\n  coalesce(dz.zone, 'Unknown') as dropoff_zone,\n  count(*)::bigint as trips,\n  round(avg(f.trip_duration_minutes), 2) as avg_minutes\nfrom {{schema}}.fact_fhvhv_trips f\nleft join {{schema}}.dim_zone pu\n  on f.pu_location_id = pu.location_id\nleft join {{schema}}.dim_zone dz\n  on f.do_location_id = dz.location_id\nwhere f.pu_location_id is not null\n  and f.do_location_id is not null\ngroup by 1, 2\norder by trips desc\nlimit 25;"
+        },
+        {
+          "type": "heading",
+          "slug": "route-context-heading",
+          "text": "Route Context",
+          "layout": { "row": 20, "col": 0, "size_x": 24, "size_y": 1 }
+        },
+        {
+          "slug": "longest-common-routes",
+          "name": "Longest common routes",
+          "description": "High-volume routes sorted by average duration.",
+          "display": "table",
+          "layout": { "row": 21, "col": 0, "size_x": 12, "size_y": 8 },
+          "query": "select\n  coalesce(pu.zone, 'Unknown') as pickup_zone,\n  coalesce(dz.zone, 'Unknown') as dropoff_zone,\n  count(*)::bigint as trips,\n  round(avg(f.trip_duration_minutes), 2) as avg_minutes\nfrom {{schema}}.fact_fhvhv_trips f\nleft join {{schema}}.dim_zone pu\n  on f.pu_location_id = pu.location_id\nleft join {{schema}}.dim_zone dz\n  on f.do_location_id = dz.location_id\nwhere f.pu_location_id is not null\n  and f.do_location_id is not null\ngroup by 1, 2\nhaving count(*) >= 100\norder by avg_minutes desc\nlimit 25;"
+        },
+        {
+          "slug": "pickup-service-zone",
+          "name": "Trips by pickup service zone",
+          "description": "Trips grouped by TLC service-zone label.",
+          "display": "bar",
+          "visualization_settings": {
+            "graph.dimensions": ["pickup_service_zone"],
+            "graph.metrics": ["trips"]
+          },
+          "layout": { "row": 21, "col": 12, "size_x": 12, "size_y": 8 },
+          "query": "select\n  coalesce(z.service_zone, 'Unknown') as pickup_service_zone,\n  count(*)::bigint as trips\nfrom {{schema}}.fact_fhvhv_trips f\nleft join {{schema}}.dim_zone z\n  on f.pu_location_id = z.location_id\ngroup by 1\norder by trips desc;"
+        }
+      ]
+    },
+    {
+      "slug": "pipeline-proof",
+      "name": "Nash DataOps - Pipeline Proof",
+      "description": "Demo-friendly validation that Bronze/Silver/Gold processing produced queryable warehouse data.",
+      "cards": [
+        {
+          "type": "heading",
+          "slug": "load-context-heading",
+          "text": "Load Context",
+          "layout": { "row": 0, "col": 0, "size_x": 24, "size_y": 1 }
+        },
+        {
+          "type": "text",
+          "slug": "load-context-note",
+          "text": "This dashboard is for explaining pipeline credibility: the loaded window, lineage fields, quality filter impact, and completeness profile.",
+          "layout": { "row": 1, "col": 0, "size_x": 24, "size_y": 1 }
+        },
+        {
+          "slug": "loaded-date-range",
+          "name": "Loaded date range",
+          "description": "Date range and distinct days represented in the fact table.",
+          "display": "table",
+          "layout": { "row": 2, "col": 0, "size_x": 12, "size_y": 5 },
+          "query": "select\n  min(pickup_date) as first_pickup_date,\n  max(pickup_date) as last_pickup_date,\n  count(distinct pickup_date)::bigint as loaded_days\nfrom {{schema}}.fact_fhvhv_trips;"
+        },
+        {
+          "slug": "source-run-ids",
+          "name": "Loaded run IDs",
+          "description": "Fact rows by pipeline run ID captured during the Glue load.",
+          "display": "bar",
+          "visualization_settings": {
+            "graph.dimensions": ["source_run_id"],
+            "graph.metrics": ["trips"]
+          },
+          "layout": { "row": 2, "col": 12, "size_x": 12, "size_y": 5 },
+          "query": "select\n  coalesce(source_run_id, 'Unknown') as source_run_id,\n  count(*)::bigint as trips\nfrom {{schema}}.fact_fhvhv_trips\ngroup by 1\norder by trips desc;"
+        },
+        {
+          "type": "heading",
+          "slug": "lineage-quality-heading",
+          "text": "Lineage and Quality",
+          "layout": { "row": 7, "col": 0, "size_x": 24, "size_y": 1 }
+        },
+        {
+          "slug": "source-files",
+          "name": "Loaded source files",
+          "description": "Source-file lineage retained on warehouse facts.",
+          "display": "table",
+          "layout": { "row": 8, "col": 0, "size_x": 12, "size_y": 8 },
+          "query": "select\n  source_file,\n  count(*)::bigint as trips\nfrom {{schema}}.fact_fhvhv_trips\ngroup by 1\norder by trips desc\nlimit 20;"
+        },
+        {
+          "slug": "duration-quality-band",
+          "name": "Duration quality band",
+          "description": "Min/max duration proves the Silver quality rule excluded invalid long trips.",
+          "display": "table",
+          "layout": { "row": 8, "col": 12, "size_x": 12, "size_y": 8 },
+          "query": "select\n  round(min(trip_duration_minutes), 2) as min_minutes,\n  round(avg(trip_duration_minutes), 2) as avg_minutes,\n  round(max(trip_duration_minutes), 2) as max_minutes\nfrom {{schema}}.fact_fhvhv_trips;"
+        },
+        {
+          "type": "heading",
+          "slug": "completeness-heading",
+          "text": "Completeness",
+          "layout": { "row": 16, "col": 0, "size_x": 24, "size_y": 1 }
+        },
+        {
+          "slug": "null-location-profile",
+          "name": "Location completeness profile",
+          "description": "Completeness values aligned with the Glue Data Quality rule thresholds.",
+          "display": "table",
+          "layout": { "row": 17, "col": 0, "size_x": 24, "size_y": 7 },
+          "query": "select 'pickup_location_id' as field_name,\n       count(pu_location_id)::bigint as non_null_rows,\n       count(*)::bigint as total_rows,\n       round(100.0 * count(pu_location_id)::decimal(18, 2) / nullif(count(*), 0), 2) as completeness_pct\nfrom {{schema}}.fact_fhvhv_trips\nunion all\nselect 'dropoff_location_id' as field_name,\n       count(do_location_id)::bigint as non_null_rows,\n       count(*)::bigint as total_rows,\n       round(100.0 * count(do_location_id)::decimal(18, 2) / nullif(count(*), 0), 2) as completeness_pct\nfrom {{schema}}.fact_fhvhv_trips\norder by field_name;"
+        }
+      ]
+    }
+  ]
+}
